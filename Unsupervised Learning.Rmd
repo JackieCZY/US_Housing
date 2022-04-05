@@ -1,0 +1,221 @@
+---
+title: "report2b"
+output: html_document
+---
+
+```{r}
+library(dclust)
+library(caret)
+library(class)
+library(tidyverse)
+library(dplyr)
+library(factoextra)
+rm(list = ls())
+rental.df <- read.csv("/Users/chenzhiyi/Desktop/BUS 212A Project/iqr_price.csv")
+# remove 'type' column 
+
+#rental.df <- subset(rental.df, select = -c(2))
+```
+
+Rental prices of apartment in United States
+Purpose of the clustering analysis:
+  To gain insights from the clustering analysis of market structure and market segmentation based on the relevant variables in dataset
+ 1. sqfeet: square feet (numeric)
+ 2. beds: number of beds (numeric)
+ 3. baths: number of baths (numeric)
+ 4. cats_allowed: (binary)
+ 5. dogs_allowed: (binary)
+ 6. smoking_allowed: (binary)
+ 7. wheelchair_access: (binary)
+ 8. electric_vehicle_charge: (binary)
+ 9. comes_furnished: (binary)
+ 10. laundry_options: (categorical)
+        [no laundry on site, laundry in bldg, laundry on site,  w/d hookups, w/d in unit] 
+        numeric indicators: [1:4]
+ 11. parking_options: (categorical)
+        [no parking, carpot, attached garage,  off-street parking, street parking, valet parking, detached garage]
+        numeric indicator: [1:6]
+ 12. state: (categorical) {for linear model}
+ 13. price: (numeric)
+ 14. price range: (binary) 
+        [High, Low]
+        numeric indicator: [1, 2]
+ 
+The dataset structure: 
+ 1. More categorical data than numeric data
+ 2. Low dimensional data: the number of observations are more than the number of features
+
+
+1. Descriptive statistics: measures of central tendency and measures of variability (spread)
+```{r}
+#change to numeric
+rental.df$price <- as.numeric(rental.df$price)
+rental.df$sqfeet <- as.numeric(rental.df$sqfeet)
+rental.df$beds <- as.numeric(rental.df$beds)
+rental.df$baths <- as.numeric(rental.df$baths)
+
+str(rental.df)
+```
+
+
+
+
+2. Distance:
+
+```{r}
+#elbow method
+rental.df.norm <- sapply(rental.df[,c(1,2,3,4)], scale)
+
+#fviz_nbclust(rental.df.norm, kmeans, method = "wss") +
+#  geom_vline(xintercept = 5, linetype = 2) +
+#  labs(subtitle = "Elbow method")
+#suggesting k=5 is a good choice
+```
+
+```{r}
+#K-means
+set.seed(2)
+rental.km <- kmeans(rental.df.norm, 5)#k=5
+rental.km$centers
+```
+
+
+```{r}
+d1 <- dist(rental.df.norm, method = "canberra")
+d2 <- dist(rental.df.norm, method = "binary")#not use
+d3 <- dist(rental.df.norm, method = "minkowski")
+d4 <- dist(rental.df.norm, method = "euclidean")
+d5 <- dist(rental.df.norm, method = "manhattan")
+d6 <- dist(rental.df.norm, method = "maximum")
+
+```
+
+3.Hierarchical Cluster
+
+```{r}
+#canberra
+hc1 <- hclust(d1, method = "ward.D")
+plot(hc1, hang = -1, ann = FALSE)
+memb1 <- cutree(hc1, h = 4000) #from elbow method
+hist(memb1)
+```
+
+```{r}
+#minkowski
+hc3 <- hclust(d3, method = "ward.D")
+plot(hc3, hang = -1, ann = FALSE)
+memb3 <- cutree(hc3, h = 3000) #from elbow method
+hist(memb3)
+```
+
+```{r}
+#euclidean
+hc4 <- hclust(d4, method = "ward.D")
+plot(hc4, hang = -1, ann = FALSE)
+memb4<- cutree(hc4, h = 4000) #from elbow method
+hist(memb4)
+```
+
+```{r}
+#manhattan
+hc5 <- hclust(d5, method = "ward.D")
+plot(hc5, hang = -1, ann = FALSE)
+memb5 <- cutree(hc5, h = 5000) #from elbow method
+hist(memb5)
+#seems to be the best?
+```
+
+```{r}
+#maximum
+hc6 <- hclust(d6, method = "ward.D")
+plot(hc6, hang = -1, ann = FALSE)
+memb6 <- cutree(hc6, h = 2000) #from elbow method
+hist(memb6)
+```
+
+
+
+```{r}
+#combined to the original data 
+#rental.km$cluster
+hclust_clusters <- memb1
+km_clusters <- rental.km$cluster
+rental.df2 <- data.frame(rental.df, hclust_clusters, km_clusters)
+```
+
+```{r}
+plot(c(0), xaxt = 'n', ylab = "", type = "l", 
+     ylim = c(min(rental.km$centers), max(rental.km$centers)), xlim = c(0, 5))
+
+# label x-axes
+axis(1, at = c(1:4), labels = c("price", "sqfeet", "beds", "baths"))
+
+# plot centroids
+for (i in c(1:5))
+  lines(rental.km$centers[i,], lty = i, lwd = 2, col = switch(i, "black", "red", 
+                                                       "green", "purple", "yellow"))
+                                                       
+                                                       
+# name clusters
+text(x = 0.5, y = rental.km$centers[, 1], labels = paste("Cluster", c(1:5)))
+
+```
+
+```{r}
+heatmap(as.matrix(rental.df.norm), Colv = NA, hclustfun = hclust, 
+        col=rev(paste("grey",1:99,sep="")))
+
+```
+
+```{r}
+#hierachical cluster
+center = aggregate(rental.df.norm, list(cluster = hclust_clusters), mean)
+hclust_center<-center[,-1]
+
+plot(c(0), xaxt = 'n', ylab = "", type = "l", 
+     ylim = c(min(hclust_center), max(hclust_center)), xlim = c(0, 5))
+axis(1, at = c(1:4), labels = c("price", "sqfeet", "beds", "baths"))
+for (i in c(1:3))
+  lines(unlist(hclust_center[i,], use.names=FALSE), lty = i, lwd = 2, col = switch(i, "black", "red", 
+                                                       "green", "purple", "yellow"))
+text(x = 0.5, y = hclust_center[, 1], labels = paste("Cluster", c(1:3)))
+
+```
+
+```{r}
+library(grid)
+library(gridExtra)
+rental.df2$hclust_clusters<-as.factor(rental.df2$hclust_clusters)
+rental.df2$km_clusters<-as.factor(rental.df2$km_clusters)
+p1 <- ggplot(rental.df2, aes(x=price, y=sqfeet, color=hclust_clusters)) + 
+  geom_point() + 
+  labs(x="Dim1",
+       y="Dim2",
+       title="Hierarchical Cluster") +
+  theme_classic() +
+  theme(plot.title = element_text(size=10),
+        axis.title = element_text(size=10),
+        legend.title = element_text(size=10)) +
+  theme(legend.position = "none")
+
+p2 <- ggplot(rental.df2, aes(x=price, y=sqfeet, color=km_clusters)) + 
+  geom_point() + 
+  labs(x="Dim1",
+       y="Dim2",
+       title="KMeans Cluster") +
+  theme_classic() +
+  theme(plot.title = element_text(size=10),
+        axis.title = element_text(size=10),
+        legend.title = element_text(size=10)) +
+  theme(legend.position = "none")
+grid.arrange(p1, p2, ncol=2, nrow=1, top=textGrob("Hierarchical vs Kmeans Clustering") )
+```
+
+
+```{r}
+#write.csv(rental.df2,"/Users/chenzhiyi/Desktop/BUS 212A Project/data_clusters.csv", row.names = FALSE)
+```
+
+
+
+

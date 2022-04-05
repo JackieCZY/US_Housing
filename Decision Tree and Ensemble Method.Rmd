@@ -1,0 +1,483 @@
+---
+title: "Trees"
+output: html_document
+---
+
+Target variable: price (numeric)
+Other variables (predictor variables):
+ 1. sqfeet: square feet (numeric)
+ 2. beds: number of beds (numeric)
+ 3. baths: number of baths (numeric)
+ 4. cats_allowed: (binary)
+ 5. dogs_allowed: (binary)
+ 6. smoking_allowed: (binary)
+ 7. wheelchair_access: (binary)
+ 8. electric_vehicle_charge: (binary)
+ 9. comes_furnished: (binary)
+ 10. laundry_options: (categorical)
+        [no laundry on site, laundry in bldg, laundry on site,  w/d hookups, w/d in unit] 
+        integer replacement: [1:4]
+ 11. parking_options: (categorical)
+        [no parking, carpot, attached garage,  off-street parking, street parking, valet parking, detached garage]
+        integer replacement: [1:6]
+ 12. state: (categorical) {for linear model}
+
+Do not need feature scaling in trees!
+```{r}
+library(rpart)
+library(rpart.plot)
+library(ggplot2)
+library(ggmap)
+library(caret)
+library(lattice)
+library(dplyr)
+rental.df <- read.csv("/Users/chenzhiyi/Desktop/BUS 212A Project/new_housing.csv")
+rental.df <- rental.df[ , -c(2)]
+rental.df <- rental.df[ , -(13)] # drop states, cause categorical should be able to divided to 2 subsets. But here the state variable is hard to be divded into 2 apropriate subsets. 
+```
+
+```{r}
+#factorize categorical variables
+str(rental.df)
+rental.df$cats_allowed <- as.factor(rental.df$cats_allowed)
+rental.df$dogs_allowed <- as.factor(rental.df$dogs_allowed)
+rental.df$smoking_allowed <- as.factor(rental.df$smoking_allowed)
+rental.df$wheelchair_access <- as.factor(rental.df$wheelchair_access)
+rental.df$electric_vehicle_charge <- as.factor(rental.df$electric_vehicle_charge)
+rental.df$comes_furnished <- as.factor(rental.df$comes_furnished)
+rental.df$laundry_options <- as.factor(rental.df$laundry_options)
+rental.df$parking_options <- as.factor(rental.df$parking_options)
+```
+
+```{r}
+#visualize the distribution of different categories first
+ggplot(rental.df, aes(x=laundry_options)) +
+  geom_bar()
+```
+
+
+```{r}
+#delete no_laundry options in laundry options as the number is to small for decision tree
+#consider two conditions: laundry within unit vs laundry not within unit
+#convert laundry_options to binary categories
+rental.df <- subset(rental.df, rental.df$laundry_options!="no laundry on site")
+rental.df$laundry_options <- factor(rental.df$laundry_options, levels = c("w/d in unit", "laundry on site", "laundry in bldg", "w/d hookups"), labels = c("laundry in unit", "laundry not in unit", "laundry not in unit", "laundry not in unit"))
+#visualize again
+#check the imbalance
+ggplot(rental.df, aes(x=laundry_options)) +
+  geom_bar()
+```
+
+```{r}
+#same for parking
+#visualize first
+ggplot(rental.df, aes(x=parking_options)) +
+  geom_bar()
+```
+
+```{r}
+#after visualizing the data, valet parking and no parking options should be removed for the representativeness
+#convert categories into two, off-street parking vs other parking options
+rental.df <- subset(rental.df, rental.df$parking_options!="no parking"& rental.df$parking_options!="valet parking")
+rental.df$parking_options <- factor(rental.df$parking_options, levels = c("off-street parking", "attached garage", "carport", "detached garage", "street parking"), labels = c("off-street parking", "other parking options", "other parking options", "other parking options", "other parking options"))
+
+ggplot(rental.df, aes(x=parking_options)) +
+  geom_bar()
+```
+
+```{r}
+#set price to binary variable price_range
+#based on median of the price
+rental.df$price_range <- ifelse(rental.df$price > median(rental.df$price), 1, 0)
+#target variable has to be categorical for decision tree to run
+rental.df$price_range <- as.factor(as.character(rental.df$price_range))
+#drop price
+#rental.df <- rental.df[,-c(1)]
+```
+
+
+
+```{r}
+#rental.class <- rental.df[ ,-c(1)]
+#partition
+set.seed(2)
+train.index <- sample(c(1:dim(rental.df)[1]), dim(rental.df)[1]*0.6)  
+train.df <- rental.df[train.index, ]
+valid.df <- rental.df[-train.index, ]
+```
+
+# classification trees
+```{r}
+#use grid search to find the best cp and minsplit
+#set F1, cp, and minsplit to worst
+curr_F1 <- 0
+best_cp<- 0
+best_minsplit <- 2
+
+for( cps in seq(from=0.001, to=0.1, by=0.01)) {#from 0 is toooo big, can minimize the range to make the tree diagram smaller
+  for( minsplits in seq(from=1, to=10, by=1)) {
+    
+    # train the tree
+    trained_tree <- rpart(price_range ~ . -price, data = train.df, method = "class", 
+                          cp = cps, minsplit = minsplits)
+    
+    # predict with the trained tree
+    train.results <- predict( trained_tree, train.df, type = "class" )
+    valid.results <- predict( trained_tree, valid.df, type = "class" )  
+    
+    # generate the confusion matrix to compare the prediction with the actual value of Personal Loan acceptance (0/1), 
+    # to calculate the sensitivity and specificity
+    results <- confusionMatrix( valid.results, as.factor(valid.df$price_range) )
+    
+    # calculate F1 from results
+    Sensitivity <- results$byClass[1] # where did this come from?
+    Specificity <- results$byClass[2] 
+    F1 <- (2 * Sensitivity * Specificity) / (Sensitivity + Specificity)
+    
+    # Is this F1 the best we have so far? If so, store the current values:
+    if( F1 > curr_F1 ) {
+      curr_F1 <- F1
+      best_cp <- cps
+      best_minsplit<- minsplits
+    }
+  }
+}
+cat("best F1=" , curr_F1, "; best best_cost_penalty=", best_cp, "; best_min_leaf_to_split=", best_minsplit)
+
+# retrain the tree to match the best parameters we found  
+trained_tree <- rpart(price_range ~ . -price, data = train.df, method = "class", 
+                      cp = best_cp , minsplit = best_minsplit )  # change the original parameters
+
+# print that best tree 
+prp(trained_tree, type = 1, extra = 1, under = TRUE, split.font = 1, varlen = -10, 
+    box.col=ifelse(trained_tree$frame$var == "<leaf>", 'gray', 'white'))  
+```
+
+```{r}
+train.results <- predict( trained_tree, train.df, type = "class" )
+valid.results <- predict( trained_tree, valid.df, type = "class" ) 
+confusionMatrix( train.results, as.factor(train.df$price_range))
+confusionMatrix( valid.results, as.factor(valid.df$price_range) )
+# F1 score 
+print("The F1 score of the test set")
+F1 <- as.numeric(curr_F1)
+F1
+```
+
+#regression tree
+```{r}
+rental.reg <- rental.df[ ,-c(13)]
+#partition
+set.seed(2)
+train.index_reg <- sample(c(1:dim(rental.reg)[1]), dim(rental.reg)[1]*0.6)  
+train.df.reg <- rental.reg[train.index_reg, ]
+valid.df.reg <- rental.reg[-train.index_reg, ]
+```
+
+
+```{r}
+# fit train data into regression tree
+  rtree.fit <- rpart(price ~., 
+                  data=train.df.reg,
+                  method="anova" #for regression tree
+  )
+
+rpart.plot(rtree.fit)
+plotcp(rtree.fit)
+prp(rtree.fit, type = 1, extra = 1, under = TRUE, split.font = 1, varlen = -10, 
+    box.col=ifelse(rtree.fit$frame$var == "<leaf>", 'gray', 'white')) 
+print(rtree.fit$cptable)
+```
+
+#dimension reduction based on the features used by the above model
+```{r}
+rental.reg <- rental.df[ ,-c(3:8,10)]
+rental.reg <- rental.reg[ ,-c(6)]
+#partition
+set.seed(2)
+train.index_reg <- sample(c(1:dim(rental.reg)[1]), dim(rental.reg)[1]*0.6)  
+train.df.reg <- rental.reg[train.index_reg, ]
+valid.df.reg <- rental.reg[-train.index_reg, ]
+```
+
+https://uc-r.github.io/regression_trees
+the probability on the top gives the percent for the predictor class. N gives the number of data points used to reached that probability and the final number on each node shows the percent of population which resides in this node.
+
+# grid search for regression tree parameters tunning
+```{r}
+hyper_grid <- expand.grid(
+  minsplit = seq(2, 15, 1),
+  cps = seq(0.001, 0.1, 0.01)
+)
+#why choose the cp range of [0.001, 0.1]
+#The complexity parameter (cp) in rpart is the minimum improvement in the model needed at each node. Though the result below shows the lower the cp, the slightly lower xerror than before, it is a trade off between the complexity and model's performance.
+#The complexity parameter (cp) is used to control the size of the decision tree and to select the optimal tree size. If the cost of adding another variable to the decision tree from the current node is above the value of cp, then tree building does not continue. We could also say that tree construction does not continue unless it would decrease the overall lack of fit by a factor of cp.
+head(hyper_grid)
+nrow(hyper_grid)
+```
+
+```{r}
+models <- list()
+
+for (i in 1:nrow(hyper_grid)) {
+  
+  # get minsplit, maxdepth values at row i
+  minsplit <- hyper_grid$minsplit[i]
+  cps <- hyper_grid$cps[i]
+
+  # train a model and store in the list
+  models[[i]] <- rpart(
+    formula = price ~ .,
+    data    = train.df.reg,
+    method  = "anova",
+    control = list(minsplit = minsplit, cp = cps)
+    )
+}
+```
+
+```{r}
+# function to get optimal cp
+get_cp <- function(x) {
+  min    <- which.min(x$cptable[, "xerror"])
+  cp <- x$cptable[min, "CP"] 
+}
+
+# function to get minimum error
+get_min_error <- function(x) {
+  min    <- which.min(x$cptable[, "xerror"])
+  xerror <- x$cptable[min, "xerror"] 
+}
+
+hyper_grid %>%
+  mutate(
+    cp    = purrr::map_dbl(models, get_cp),
+    error = purrr::map_dbl(models, get_min_error)
+    ) %>%
+  arrange(error) %>%
+  top_n(-5, wt = error)
+```
+
+```{r}
+optimal_tree <- rpart(
+    formula = price ~ .,
+    data    = train.df.reg,
+    method  = "anova",
+    control = list(minsplit = 6, cp = 0.001)
+    )
+# The explaination for minimum split: The minimum number of values in a node that must exist before a split is attempted. In other words, if the node has two members and the minimum split is set to 5, the node will become terminal, that is, no split will be attempted. 
+rpart.plot(optimal_tree)
+prp(optimal_tree, type = 1, extra = 1, under = TRUE, split.font = 1, varlen = -10, 
+    box.col=ifelse(optimal_tree$frame$var == "<leaf>", 'gray', 'white')) 
+pred <- predict(optimal_tree, newdata = valid.df.reg)
+RMSE(pred = pred, obs = valid.df.reg$price) #Root Mean Squared Error
+```
+
+```{r}
+variance <- var(rental.reg$price)
+variance
+var_sqrt <- sqrt(variance)
+var_sqrt
+```
+
+#r-squared for regression tree
+```{r}
+library(forecast)
+
+accuracy(pred, valid.df.reg$price)
+accuracy(optimal_tree$y, train.df.reg$price)
+
+SSR_tree <- sum(valid.df.reg$price - pred)
+pred_mean <- mean(pred)
+print(pred_mean)
+SST_tree <- sum(valid.df.reg$price - pred_mean)
+r_squared <- 1-(SSR_tree/SST_tree)
+r_squared
+N <- 7663
+p <- 5
+adjuested_r <- (1-r_squared)*(N-1)/(N-p-1)
+adjuested_r
+```
+
+#bagged tree
+```{r}
+library(ipred)
+rental.bagging <- rental.df[ ,-c(1)]
+#partition
+set.seed(2)
+train.index_bagging <- sample(c(1:dim(rental.bagging)[1]), dim(rental.bagging)[1]*0.6)  
+train.df_bagging <- rental.bagging[train.index_bagging, ]
+valid.df_bagging <- rental.bagging[-train.index_bagging, ]
+```
+
+```{r}
+# Specify 10-fold cross validation
+ctrl <- trainControl(method = "cv",  number = 10) 
+
+# CV bagged model
+bagged_cv <- train(
+  price_range ~.,
+  data = train.df_bagging,
+  method = "treebag",
+  trControl = ctrl,
+  importance = TRUE
+  )
+
+# assess results
+bagged_cv
+
+# plot most important variables
+plot(varImp(bagged_cv), 11)  
+```
+
+#confusion matrix for bagged tree
+```{r}
+pred <- predict(bagged_cv, valid.df_bagging)
+valid_con <- confusionMatrix( pred, as.factor(valid.df_bagging$price_range) )
+valid_con
+train_con <- confusionMatrix( bagged_cv$y, as.factor(train.df_bagging$price_range) )
+train_con
+
+F1_score_bagging <- 2*(0.7125*0.7010) / (0.7125+0.7010) # for test set
+F1_score_bagging 
+```
+
+#Bagging tree after prune
+```{r}
+pbagged_m1 <- prune(bagged_m1) #the pruned trees is returned
+print(pbagged_m1)
+pred_p <- predict(pbagged_m1, valid.df_bagging)
+valid_con_p <- confusionMatrix( pred_p, as.factor(valid.df_bagging$price_range) )
+valid_con_p
+train_con_p <- confusionMatrix( pbagged_m1$y, as.factor(train.df_bagging$price_range) )
+train_con_p
+
+F1_score_bagging1 <- 2*(0.6188*0.7537) / (0.6188+0.7537) # for test set after prune
+F1_score_bagging1
+```
+
+
+
+#random forest
+
+```{r}
+#try some randomForest
+library(randomForest)
+rf <- randomForest(price_range~. -price, data=train.df, ntree = 500, mtry =4, nodesize =5, importance=TRUE)
+varImpPlot(rf, type = 1)
+rf.pred <- predict(rf, valid.df)
+con_valid <- confusionMatrix(rf.pred, as.factor(valid.df$price_range))
+con_valid
+```
+#grid search for randomForest
+
+```{r}
+curr_F1 <- 0
+best_ntree<- 0
+best_mtry <- 2
+for( i in seq(from=100, to=500, by=100)) {
+  for( j in seq(from=1, to=10, by=1)) {
+    
+    # train the tree
+    trained_tree <-randomForest(price_range~. -price, data=train.df, ntree = i, mtry =j, nodesize =5, importance=TRUE)
+    
+    # predict with the trained tree
+    train.results <- predict( trained_tree, train.df, type = "class" )
+    valid.results <- predict( trained_tree, valid.df, type = "class" )  
+    
+    # generate the confusion matrix to compare the prediction with the actual value of Personal Loan acceptance (0/1), 
+    # to calculate the sensitivity and specificity
+    results <- confusionMatrix( valid.results, as.factor(valid.df$price_range) )
+    
+    # calculate F1 from results
+    Sensitivity <- results$byClass[1] # where did this come from?
+    Specificity <- results$byClass[2] 
+    F1 <- (2 * Sensitivity * Specificity) / (Sensitivity + Specificity)
+    
+    # Is this F1 the best we have so far? If so, store the current values:
+    if( F1 > curr_F1 ) {
+      curr_F1 <- F1
+      best_ntree <- i
+      best_mtry<- j
+    }
+  }
+}
+cat("best F1=" , curr_F1, "; best best_ntree=", best_ntree, "; best_mtry=", best_mtry)
+
+# retrain the tree to match the best parameters we found  
+rf <-randomForest(price_range~. -price, data=train.df, ntree = best_ntree, mtry =best_mtry, nodesize =5, importance=TRUE)
+
+rf.pred <- predict(rf, valid.df)
+con_valid <- confusionMatrix(rf.pred, as.factor(valid.df$price_range))
+```
+
+
+
+```{r}
+#best F1 = 0.7286, best_ntree = 300, best_mtry = 4
+varImpPlot(rf, type = 1)
+con_valid
+```
+
+
+# Boosted Tree
+
+```{r}
+library(adabag)
+set.seed(2)
+
+
+price_boost <- boosting(price_range~. -price, mfinal = 100, data=train.df)
+price_boost_pred <- predict(price_boost, valid.df)
+confusionMatrix(as.factor(price_boost_pred$class), as.factor(valid.df$price_range))
+
+importanceplot(price_boost)
+```
+#grid search boosted tree
+
+```{r}
+curr_F1 <- 0
+best_mfinal<- 0
+
+for( i in seq(from=1, to=100, by=10)) {
+    # train the tree
+    trained_tree <-boosting(price_range~. -price, mfinal = i, data=train.df)
+    
+    # predict with the trained tree
+    train.results <- predict( trained_tree, train.df )
+    valid.results <- predict( trained_tree, valid.df )  
+    
+    # generate the confusion matrix to compare the prediction with the actual value of Personal Loan acceptance (0/1), 
+    # to calculate the sensitivity and specificity
+    results <- confusionMatrix(as.factor(valid.results$class), as.factor(valid.df$price_range))
+    
+    # calculate F1 from results
+    Sensitivity <- results$byClass[1] # where did this come from?
+    Specificity <- results$byClass[2] 
+    F1 <- (2 * Sensitivity * Specificity) / (Sensitivity + Specificity)
+    
+    # Is this F1 the best we have so far? If so, store the current values:
+    if( F1 > curr_F1 ) {
+      curr_F1 <- F1
+      best_mfinal <- i
+    
+    }
+  }
+cat("best F1=" , curr_F1, "; best mfinal=", best_mfinal )
+
+price_boost <- boosting(price_range~. -price, mfinal = best_mfinal, data=train.df)
+price_boost_pred <- predict(price_boost, valid.df)
+confusionMatrix(as.factor(price_boost_pred$class), as.factor(valid.df$price_range))
+
+varImpPlot(price_boost, type = 1)
+```
+
+
+
+ASSUMPTIONS OF TREES
+1. The whole training set is considered as the root.
+2. Feature values are preferred to be categorical. If the values are continuous then they are discretized prior to building the model.
+3. Records are distributed recursively on the basis of attribute values.
+Order to placing attributes as root or internal node of the tree is done by using some statistical approach.
+
+
+

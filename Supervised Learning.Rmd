@@ -1,0 +1,596 @@
+---
+title: "Report 2a: Supervised Learning"
+author:
+- Yunhao Bai
+- Zhiyi Chen
+- Michelle Guan
+- Huiqiong Wu
+date: "2 March, 2022"
+output:
+  pdf_document:
+    number_sections: no
+    toc_depth: 4
+  word_document:
+    toc_depth: '4'
+  html_document:
+    df_print: paged
+    toc_depth: '4'
+subtitle: 'BUS 212A: Big Data II'
+header-includes:
+- \usepackage{fancyhdr}
+- \pagestyle{fancy}
+- \fancyhf{}
+- \rhead{}
+- \lhead{}
+- \cfoot{\thepage}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(ggplot2)
+library(tidyverse)
+library(leaps)
+library(forecast)
+library(car)
+library(caret)
+library(psych)
+library(GGally)
+library(gplots)
+library(referenceIntervals)
+```
+\centering
+\raggedright
+\newpage
+\tableofcontents
+
+\newpage
+
+### Data Cleaning
+```{r, comment=NA}
+setwd("/Users/chenzhiyi/Desktop/BUS 212A Project")
+housing<-read.csv("new_housing.csv")
+housing <- subset(housing, select = -c(1:3, 5, 17:18, 20))
+#characterize variables
+housing$cats_allowed = as.character(housing$cats_allowed)
+housing$dogs_allowed = as.character(housing$dogs_allowed)
+housing$smoking_allowed = as.character(housing$smoking_allowed)
+housing$wheelchair_access = as.character(housing$wheelchair_access)
+housing$electric_vehicle_charge = as.character(housing$electric_vehicle_charge)
+housing$comes_furnished = as.character(housing$comes_furnished)
+#multiple regression with price as target
+lm_housing <- lm(price~. ,data=housing)
+options(scipen = 999)
+#summary(lm_housing)
+vif(lm_housing)
+```
+
+### Descriptive Analysis
+
+```{r, comment= NA}
+median(housing$price)
+mode(housing$laundry_options)
+summary(is.na(housing$parking_options))
+
+```
+
+Descriptive analysis
+Target variable: price_range (categorical)
+    [Low; High]
+    integer replacement: [0, 1]
+Target variable: price (numeric)
+Other variables (predictor variables):
+ 1. sqfeet: square feet (numeric)
+ 2. beds: number of beds (numeric)
+ 3. baths: number of baths (numeric)
+ 4. cats_allowed: (binary)
+ 5. dogs_allowed: (binary)
+ 6. smoking_allowed: (binary)
+ 7. wheelchair_access: (binary)
+ 8. electric_vehicle_charge: (binary)
+ 9. comes_furnished: (binary)
+ 10. laundry_options: (categorical)
+        [no laundry on site, laundry in bldg, laundry on site,  w/d hookups, w/d in unit] 
+        integer replacement: [1:4]
+ 11. parking_options: (categorical)
+        [no parking, carpot, attached garage,  off-street parking, street parking, valet parking, detached garage]
+        integer replacement: [1:6]
+ 12. state: (categorical) {for linear model}
+ 
+The dataset structure: more categorical data than numeric data
+
+```{r, comment=NA}
+housingP<-housing
+housingPR <- housing
+housingPR <- housingPR %>%
+ mutate(price_range = ifelse(
+    price %in% c(0:1125), 0,
+    ifelse(price %in% c(1126:20000000),
+    1, "NA"))
+ )
+housingP$price_range <- housingPR$price_range
+```
+
+```{r, commeng=NA}
+describe(housingP$price)
+describe(housingP$sqfeet)
+describe(housingP$beds)
+describe(housingP$baths)
+summary(housingP$price)
+summary(housingP$sqfeet)
+summary(housingP$beds)
+summary(housingP$baths)
+getmode <- function(x) {
+  uniqx <- unique(x)
+  uniqx[which.max(tabulate(match(x,uniqx)))]
+}
+x <- c(housingP$price)
+result1 <- getmode(x)
+print(result1)
+
+y <- c(housingP$sqfeet)
+result2 <- getmode(y)
+print(result2)
+
+z <- c(housingP$beds)
+result3 <- getmode(z)
+print(result3)
+
+i <- c(housingP$baths)
+result4 <- getmode(i)
+print(result4)
+
+ggplot(housingP, aes(x=price))+  # not normal, skewed, but sample size here is large enough
+  geom_histogram()+
+  ggtitle("Distribution of rental price")
+
+ggplot(housingP, aes(x=beds)) +
+  geom_histogram()+
+  ggtitle("Distribution of number of beds")
+
+ggplot(housingP, aes(x=sqfeet)) +  # numeric data's distribution and make it more Gaussian
+  geom_histogram()+
+  ggtitle("Distribution of square feet")
+
+ggplot(housingP, aes(x=baths)) +  # numeric data's distribution and make it more Gaussian
+  geom_histogram()+
+  ggtitle("Distribution of number of baths")
+```
+
+#### Numeric data
+
+```{r}
+ggplot(housingP, aes(x=price_range, y=price, color=price_range))+
+  geom_boxplot() + 
+    xlab("Price range") +
+    ylab("Rental price") +
+    facet_wrap("price_range", scales = "free")+
+    ggtitle("Box Plot:Price Range by Rental Price")
+
+ggplot(housingP, aes(x=price_range, y=sqfeet, color=price_range))+
+  geom_boxplot() + 
+    xlab("Price range") +
+    ylab("Square feet") +
+    facet_wrap("price_range", scales = "free")+
+    ggtitle("Box Plot:Price Range by Square Feet")
+
+ggplot(housingP, aes(x=price_range, y=beds, fill=price_range)) +
+    geom_violin() +
+    xlab("Price range") +
+    ylab("Number of beds") +
+    facet_wrap("price_range", scales = "free") +
+    ggtitle("Violin Plot:Price Range by Number of Beds")
+
+ggplot(housingP, aes(x=price_range, y=baths, color=price_range))+
+  geom_violin() + 
+    xlab("Price range") +
+    ylab("Number of baths") +
+    facet_wrap("price_range", scales = "free")+
+    ggtitle("Violin Plot:Price Range by Number of Baths")
+
+ggplot(housingP, aes(x=beds, fill=price_range))+
+  geom_bar()+
+  ylab("Number of beds") +
+  facet_wrap("price_range", scales = "free") +
+  ggtitle("Distribution of Number of Beds by Price Range")
+
+ggplot(housingP, aes(x=baths, fill=price_range))+
+  geom_bar()+
+  ylab("Number of baths") +
+  facet_wrap("price_range", scales = "free") +
+  ggtitle("Distribution of Number of Baths by Price Range")
+
+# scatter plor matrix
+housing.num <- c("price", "sqfeet", "beds", "baths", "price_range")
+housing.numeric <- housingP[housing.num]
+typeof(housing.numeric$price_range)
+housing.numeric$price_range <- as.numeric(as.character(housing.numeric$price_range))
+heatmap.2(cor(housing.numeric), dendrogram = "none",cellnote = round(cor(housing.numeric), 2), notecol = "black", key = FALSE, trace = 'none', margins = c(10,10)) 
+ggpairs(housing.numeric)
+```
+
+#### Categorical Data
+
+```{r}
+ggplot(housingP, aes(x=cats_allowed, y=price, fill=cats_allowed)) +
+  geom_boxplot()+
+  facet_wrap("cats_allowed", scales = "free") 
+ggplot(housingP, aes(x=dogs_allowed, y=price, fill=dogs_allowed)) +
+  geom_boxplot()+
+  facet_wrap("dogs_allowed", scales = "free")
+ggplot(housingP, aes(x=smoking_allowed, y=price, fill=smoking_allowed)) +
+  geom_boxplot()+
+  facet_wrap("smoking_allowed", scales = "free")
+ggplot(housingP, aes(x=wheelchair_access, y=price, fill=wheelchair_access)) +
+  geom_boxplot()+
+  facet_wrap("wheelchair_access", scales = "free")
+ggplot(housingP, aes(x=electric_vehicle_charge, y=price, fill=electric_vehicle_charge)) +
+  geom_boxplot()+
+  facet_wrap("electric_vehicle_charge", scales = "free")
+ggplot(housingP, aes(x=comes_furnished, y=price, fill=comes_furnished)) +
+  geom_boxplot()+
+  facet_wrap("comes_furnished", scales = "free")
+ggplot(housingP, aes(x=laundry_options, y=price, fill=laundry_options)) +
+  geom_boxplot()+
+  facet_wrap("laundry_options", scales = "free_x")
+ggplot(housingP, aes(x=parking_options, y=price, fill=parking_options)) +
+  geom_boxplot()+
+  facet_wrap("parking_options", scales = "free_x")
+```
+
+In matrix graph, information can obtain from the matrix graph: 
+  1. potential curvilinear relationship: beds, sqfeet, baths [interaction term/ polynomial term for later model building]
+  2. linear relationship
+
+```{r}
+ggplot(housingP, aes(x=price_range, fill = price_range)) +
+  geom_bar()
+# check for curviliearity (sqfeet and price)
+ggplot(housingP, aes(x=sqfeet, y=price))+
+  geom_point()+
+  stat_smooth() +
+  ggtitle("Relationship between price and sqfeet")
+
+```
+
+### Multiple Regression
+### Diagnostic Plot
+
+```{r, comment=NA}
+par(mfrow=c(2,2))
+plot(lm_housing)
+```
+
+#### Histogram of Residuals
+
+```{r, comment=NA}
+ggplot(data = housing, aes(x = lm_housing$residuals)) +
+    geom_histogram(fill = 'steelblue', color = 'black') +
+    labs(title = 'Histogram of Residuals', x = 'Residuals', y = 'Frequency')
+```
+
+#### Remove Outliers
+##### Interquartile range
+
+```{r}
+housing$price = log(housing$price)
+q1 <- quantile(housing$price, 0.25, na.rm=TRUE)
+q3 <- quantile(housing$price, 0.75, na.rm=TRUE)
+iqr <- IQR(housing$price, na.rm=TRUE)
+
+clean_housing <- subset(housing, housing$price > (q1-1.5*iqr) & housing$price < (q3+1.5*iqr))
+
+lm_housing <- lm(price~. ,data=clean_housing)
+options(scipen = 999)
+#summary(lm_housing)
+vif(lm_housing)
+par(mfrow=c(2,2))
+plot(lm_housing)
+
+#count outliers
+outliers<-count(housing)-count(clean_housing)
+percent_outliers<-outliers/count(housing)
+percent_outliers
+
+```
+
+
+
+
+#### Skewness 
+
+```{r}
+
+#sqfeet
+hist(clean_housing$sqfeet)
+#sqfeet is right-skewed
+#change the sqfeet to log term
+clean_housing$sqfeet = log10(clean_housing$sqfeet)
+#nearly become guassian
+hist(clean_housing$sqfeet)
+
+```
+
+
+### Train and Test
+
+```{r}
+set.seed(2)
+train.index <- sample(c(1:dim(clean_housing)[1]), dim(clean_housing)[1]*0.6)  
+housing.train <- clean_housing[train.index, ]
+housing.valid <- clean_housing[-train.index, ]
+lm_housing <- lm(price ~., data=housing.train)
+
+```
+
+
+### Selection
+
+#### Forward Selection
+
+```{r, comment=NA}
+#forward selection
+lm_housing_null <- lm(price~1, data=housing.valid)
+housing.lm.step.forward <- step(lm_housing_null, list(upper=lm_housing), direction="forward")
+#summary(housing.lm.step.forward)
+housing.lm.step.forward.pred <- predict(housing.lm.step.forward, housing.valid)
+accuracy(housing.lm.step.forward.pred, housing.valid$price)
+
+
+#price ~ state + sqfeet + laundry_options + parking_options + cats_allowed + smoking_allowed + electric_vehicle_charge + baths + beds
+
+```
+
+#### Backward Elimination
+```{r, comment=NA}
+housing.lm.step.backward <- step(lm_housing, direction="backward")
+#summary(housing.lm.step.backward)
+housing.lm.step.backward.pred <- predict(housing.lm.step.backward, housing.valid)
+accuracy(housing.lm.step.backward.pred, housing.valid$price)
+
+
+#price ~ sqfeet + beds + baths + cats_allowed + dogs_allowed + smoking_allowed + electric_vehicle_charge + laundry_options + parking_options + state
+```
+
+#### Bidirection Search
+```{r, comment=NA}
+housing.lm.step.both <- step(lm_housing, direction="both")
+#summary(housing.lm.step.both)
+housing.lm.step.both.pred <- predict(housing.lm.step.both, housing.valid)
+accuracy(housing.lm.step.both.pred, housing.valid$price)
+
+
+
+#price ~ sqfeet + beds + baths + cats_allowed + dogs_allowed + smoking_allowed + electric_vehicle_charge + laundry_options + parking_options + state
+
+```
+
+#### Higher-order terms
+
+```{r, comment=NA}
+#use the logged-sqfeet term as polynomial 
+lm.poly <- lm(price ~ sqfeet + I(sqfeet^2) + beds + baths + cats_allowed + dogs_allowed + smoking_allowed + wheelchair_access + electric_vehicle_charge + comes_furnished + laundry_options + parking_options + state, data=housing.train)
+housing.lm.poly.pred <- predict(lm.poly, housing.valid)
+summary(lm.poly)
+```
+
+#### Adjusted R-squared and RMSE
+
+```{r}
+library(caret)
+df<- data.frame(AdjR2=c(summary(housing.lm.step.forward)$adj.r.squared,
+                        summary(housing.lm.step.backward)$adj.r.squared,
+                        summary(housing.lm.step.both)$adj.r.squared,
+                        summary(lm.poly)$adj.r.squared), 
+                RMSE = c(RMSE(housing.lm.step.forward.pred, as.numeric(housing.valid$price)),
+                         RMSE(housing.lm.step.backward.pred,as.numeric(housing.valid$price)),
+                         RMSE(housing.lm.step.both.pred, as.numeric(housing.valid$price)),
+                         RMSE(housing.lm.poly.pred, as.numeric(housing.valid$price)))
+                )
+
+rownames(df)<-c("Forward Selection", "Backward Elimination", "Bidirectional Search", "Polynomial Regression")
+print(df)
+# forward selection has higher adjr2 and lower RMSE
+# forward selection is the best model
+```
+#### Best Model
+
+```{r, comment=NA}
+#best
+#summary(housing.lm.step.forward)
+```
+
+### Logistic Regression
+
+Logistic model
+Multicollinearity affects the coefficients and p-values, but it does not influence the predictions, precision of the predictions, and the goodness-of-fit statistics. If your primary goal is to make predictions, and you don’t need to understand the role of each independent variable, you don’t need to reduce severe multicollinearity.
+
+```{r}
+# remove outliers by using IQR
+q1 <- quantile(housingP$price, 0.25)
+print(q1)
+q3 <- quantile(housingP$price, 0.75)
+print(q3)
+iqr <- IQR(housingP$price)
+print(iqr)
+# from statistic features of variables shown, the distribution of our variables are skewed so it is better to IQR method to help remove outliars
+# upper limit: q3+1.5*iqr
+# lower limit: q1-1.5*iqr
+clean_housing <- subset(housingP, housingP$price > (q1-1.5*iqr) & housingP$price < (q3+1.5*iqr))
+iqr
+# therefore, we get the percentage of outliers to be removed 
+outliers<-count(housingP)-count(clean_housing)
+percent_outliers<-outliers/count(housingP)
+print(percent_outliers)
+
+# data transformation --> more normalized
+
+housing_clean_log <- log(clean_housing$price)
+clean_housing$price <- housing_clean_log
+clean_housing$sqfeet <- log(clean_housing$sqfeet)
+```
+
+
+```{r}
+# replace categorical values with numbers
+clean_housing$laundry_options <- case_when(
+  clean_housing$laundry_options == "no laundry on site" ~ 0,
+  clean_housing$laundry_options == "laundry in bldg" ~ 1,
+  clean_housing$laundry_options == "laundry on site" ~ 2,
+  clean_housing$laundry_options == "w/d hookups" ~ 3,
+  clean_housing$laundry_options == "w/d in unit" ~ 4
+)
+
+clean_housing$parking_options <- case_when(
+  clean_housing$parking_options == "no parking" ~ 0,
+  clean_housing$parking_options == "carport" ~ 1,
+  clean_housing$parking_options == "attached garage" ~ 2,
+  clean_housing$parking_options == "off-street parking" ~ 3,
+  clean_housing$parking_options == "street parking" ~ 4,
+  clean_housing$parking_options == "valet parking" ~ 5,
+  clean_housing$parking_options == "detached garage" ~ 6
+)
+clean_housing <- clean_housing[-c(1:3, 5,17, 18,19,20)]
+clean_housing$price_range <- as.numeric(as.character(clean_housing$price_range))
+
+set.seed(2)
+train.index <- sample(c(1:dim(clean_housing)[1]), dim(clean_housing)[1]*0.6)  
+train.df <- clean_housing[train.index, ]
+valid.df <- clean_housing[-train.index, ]
+```
+
+```{r}
+logit.reg_logit1 <- glm(price_range ~.-price-sqfeet+I(sqfeet^2), data = train.df, family = binomial(link = "logit"))
+options(scipen=999)
+summary(logit.reg_logit1)
+
+VIFcheck <- lm( price_range ~.-price-sqfeet+I(sqfeet^2), data = train.df)
+vif(VIFcheck)
+```
+```{r}
+logit.reg_logit2 <- glm(price_range ~.-price-dogs_allowed-comes_furnished-sqfeet-wheelchair_access+I(sqfeet^2), data = train.df, family = binomial(link = "logit"))
+options(scipen=999)
+summary(logit.reg_logit2)
+
+VIFcheck <- lm( price_range ~.-price-dogs_allowed-comes_furnished-sqfeet-wheelchair_access+I(sqfeet^2), data = train.df)
+vif(VIFcheck)
+
+par(mfrow=c(2,2)) 
+plot(logit.reg_logit2)
+```
+```{r}
+#remove extreme outlier
+# from Normal Q-Q plot, we find data at 2837 row is outlier here
+train.df <- train.df[-c(2837), ]
+logit.reg_logit2 <- glm(price_range ~.-price-dogs_allowed-comes_furnished-sqfeet-wheelchair_access+I(sqfeet^2), data = train.df, family = binomial(link = "logit"))
+options(scipen=999)
+summary(logit.reg_logit2)
+
+VIFcheck <- lm( price_range ~.-price-dogs_allowed-comes_furnished-sqfeet-wheelchair_access+I(sqfeet^2), data = train.df)
+vif(VIFcheck)
+
+par(mfrow=c(2,2)) 
+plot(logit.reg_logit2)
+```
+
+
+```{r}
+logit.reg.pred <- predict(logit.reg_logit2, valid.df, type = "response")
+data.frame(actual = valid.df$price_range, predicted = logit.reg.pred)
+library(gains)
+gain <- gains(valid.df$price_range, logit.reg.pred, groups=10)
+plot(c(0,gain$cume.pct.of.total*sum(valid.df$price_range))~c(0,gain$cume.obs), 
+     xlab="# cases", ylab="Cumulative", main="", type="l")
+lines(c(0,sum(valid.df$price_range))~c(0, dim(valid.df)[1]), lty=2)
+
+```
+
+```{r}
+# odds
+odds.df <- data.frame(odds = exp(coef(logit.reg_logit2))) 
+vec.odds <- odds.df$odds - 1
+odds.df$odds_1 <- vec.odds
+odds.df
+```
+
+```{r}
+summary(logit.reg.pred)
+confusionMatrix(as.factor(ifelse(logit.reg.pred > 0.5, 1, 0)), as.factor(valid.df$price_range))
+confusionMatrix(as.factor(ifelse(logit.reg_logit2$fitted.values > 0.5, 1, 0)), as.factor(train.df$price_range))
+# F1 Score = 2 * (Precision * Recall) / (Precision + Recall)
+F1 <- 2* (0.7230*0.6179) / (0.7230+0.6179)
+F1
+```
+
+```{r}
+residuals_logit <- c(logit.reg_logit2$residuals)
+residuals_logit <- as.data.frame(residuals_logit)
+summary(logit.reg_logit2$residuals)
+zero <- logit.reg_logit2$residuals == 0
+summary(zero)
+ggplot(residuals_logit,aes(x=residuals_logit)) +
+        geom_histogram()
+```
+
+```{r}
+library(caret)
+library(FNN)
+library(class)
+```
+
+```{r}
+plot(price ~ exp(sqfeet), data=train.df, pch=ifelse(train.df$price_range==0, "o", "+"))
+```
+
+### KNN
+
+```{r}
+train.df$price_range <- as.factor(train.df$price_range)
+levels(train.df$price_range) = make.names(levels(factor(train.df$price_range)))
+set.seed(2)
+
+#- Define controls
+x = trainControl(method = "repeatedcv",
+                 number = 10,
+                 repeats = 3,
+                 classProbs = TRUE,
+                 summaryFunction = twoClassSummary)
+
+knn = train(price_range~. , data = train.df[, 2:13], method = "knn",
+               preProcess = c("center","scale"),
+               trControl = x,
+               metric = "ROC",
+               tuneLength = 10)
+knn
+
+train.df$predicted <- predict(knn, train.df, "prob")[,2]
+
+train.df$predicted = ifelse(train.df$predicted > 0.5, 1,0)
+train.df$price_range  = ifelse(train.df$price_range == 'X0', 0,1)
+confusionMatrix(factor(train.df$predicted),
+                factor(train.df$price_range))
+
+valid.df$predicted <- predict(knn, valid.df, "prob")[,2]
+
+valid.df$predicted = ifelse(valid.df$predicted > 0.5, 1,0)
+
+confusionMatrix(factor(valid.df$predicted),
+                factor(valid.df$price_range))
+
+
+```
+
+
+```{r}
+F1_knn <- 2 * (0.7670*0.6312) / (0.7670+0.6312)
+F1_knn
+```
+
+
+
+
+
+
+
+
+
