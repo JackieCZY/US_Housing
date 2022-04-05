@@ -27,3 +27,6 @@ Features of the new dataset
 - smaller in size
 - may still contain outliers
 - violates the normality assumption
+
+## Results
+Accuracy of best model: 72.98% (randomForest)
