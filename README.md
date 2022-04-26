@@ -28,5 +28,23 @@ Features of the new dataset
 - may still contain outliers
 - violates the normality assumption
 
+Data Description:
+
+<img width="569" alt="Screen Shot 2022-04-26 at 11 53 44 AM" src="https://user-images.githubusercontent.com/103064444/165342650-e6ab6c1a-d3ff-4be5-8e9b-15a024f7f32d.png">
+
 ## Results
-Accuracy of best model: 72.98% (randomForest)
+Accuracy of best handcrafted model: 72.98% (randomForest)
+
+## DataRobot
+We used datarobot to see if our model can perform better in terms of predicting apartment price
+
+Classification Model:
+
+<img width="703" alt="Screen Shot 2022-04-26 at 11 53 21 AM" src="https://user-images.githubusercontent.com/103064444/165341867-77c63915-a5f7-4c09-877d-a4f9b8432cbe.png">
+
+Regression Model:
+
+<img width="682" alt="Screen Shot 2022-04-26 at 11 53 04 AM" src="https://user-images.githubusercontent.com/103064444/165342011-ef6bb577-f507-4c56-ae6f-08194154bf1e.png">
+
+Extreme Gradient Boosted Tree Classifier with Early Stoppting has a better performing model with higher F1 Score: 0.8146
+
